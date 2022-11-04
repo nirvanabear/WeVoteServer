@@ -372,7 +372,7 @@ def voter_guide_create_view(request):
                     is_list_of_endorsements_for_candidate = False
 
                 # Fill the possible_endorsement_list with the latest data
-                # Note that this extraction is limited to 200 possibilities to avoid very slow page loads
+                # POSSIBILITY_LIST_LIMIT set to 400 possibilities to avoid very slow page loads, formerly 200
                 results = extract_voter_guide_possibility_position_list_from_database(voter_guide_possibility)
 
                 if results['possible_endorsement_list_found']:
@@ -507,7 +507,7 @@ def voter_guide_create_view(request):
         # #########################
         # voter_guide_create_view: Find the candidate who is the subject of this page
         if positive_value_exists(candidate_we_vote_id):
-            results = candidate_manager.retrieve_candidate_from_we_vote_id(candidate_we_vote_id)
+            results = candidate_manager.retrieve_candidate_from_we_vote_id(candidate_we_vote_id, read_only=True)
             if results['candidate_found']:
                 candidate = results['candidate']
                 candidate_found = True
@@ -519,7 +519,8 @@ def voter_guide_create_view(request):
                 google_civic_election_id_list=google_civic_election_id_list_this_year,
                 state_code=state_code,
                 candidate_twitter_handle=candidate_twitter_handle,
-                candidate_name=candidate_name)
+                candidate_name=candidate_name,
+                read_only=True)
             if results['candidate_list_found']:
                 owner_of_website_candidate_list = results['candidate_list']
                 owner_of_website_candidate_list_count = len(owner_of_website_candidate_list)
@@ -1058,7 +1059,7 @@ def voter_guide_create_process_view(request):
         # If here is_list_of_endorsements_for_candidate is true
         # First, identify the candidate that is the subject of the page we are analyzing
         if positive_value_exists(candidate_we_vote_id):
-            results = candidate_manager.retrieve_candidate_from_we_vote_id(candidate_we_vote_id)
+            results = candidate_manager.retrieve_candidate_from_we_vote_id(candidate_we_vote_id, read_only=True)
             if results['candidate_found']:
                 candidate = results['candidate']
                 candidate_found = True
@@ -1070,7 +1071,8 @@ def voter_guide_create_process_view(request):
                     google_civic_election_id_list=google_civic_election_id_list_this_year,
                     state_code=state_code,
                     candidate_twitter_handle=candidate_twitter_handle,
-                    candidate_name=candidate_name)
+                    candidate_name=candidate_name,
+                    read_only=True)
                 if results['candidate_found']:
                     candidate = results['candidate']
                     candidate_found = True
@@ -1587,8 +1589,9 @@ def generate_voter_guides_view(request):
         # As of August 2018 exclude Vote Smart ratings (vote_smart_rating__isnull)
         positions_exist_query = positions_exist_query.filter(
             Q(vote_smart_rating__isnull=True) | Q(vote_smart_rating=""))
-        organization_we_vote_ids_with_positions = \
+        organization_we_vote_ids_with_positions_query = \
             positions_exist_query.values_list('organization_we_vote_id', flat=True).distinct()
+        organization_we_vote_ids_with_positions = list(organization_we_vote_ids_with_positions_query)
 
         for organization_we_vote_id in organization_we_vote_ids_with_positions:
             results = voter_guide_manager.update_or_create_organization_voter_guide_by_election_id(
@@ -1694,8 +1697,9 @@ def generate_voter_guides_for_one_election_view(request):
     # As of August 2018 exclude Vote Smart ratings (vote_smart_rating__isnull)
     positions_exist_query = positions_exist_query.filter(
         Q(vote_smart_rating__isnull=True) | Q(vote_smart_rating=""))
-    organization_we_vote_ids_with_positions = \
+    organization_we_vote_ids_with_positions_query = \
         positions_exist_query.values_list('organization_we_vote_id', flat=True).distinct()
+    organization_we_vote_ids_with_positions = list(organization_we_vote_ids_with_positions_query)
 
     elections_dict = {}
     for organization_we_vote_id in organization_we_vote_ids_with_positions:

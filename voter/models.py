@@ -41,22 +41,29 @@ INTERFACE_STATUS_THRESHOLD_ORGANIZATIONS_FOLLOWED = 5
 # notification_flag_integer_to_set, notification_flag_integer_to_unset
 # Used for notification_settings bits. Which notification options has the voter chosen?
 NOTIFICATION_ZERO = 0
-NOTIFICATION_NEWSLETTER_OPT_IN = 1  # "I would like to receive the We Vote newsletter"
-# NOTIFICATION_FRIEND_REQUESTS = n/a,  # In App: "New friend requests, and responses to your requests"
-NOTIFICATION_FRIEND_REQUESTS_EMAIL = 2  # Email: "New friend requests, and responses to your requests"
-NOTIFICATION_FRIEND_REQUESTS_SMS = 4  # SMS: "New friend requests, and responses to your requests"
+NOTIFICATION_NEWSLETTER_OPT_IN = 1  # "I would like to receive the We Vote newsletter" - newsletter
+# NOTIFICATION_FRIEND_REQUESTS = n/a,  # In App: "New friend requests"
+NOTIFICATION_FRIEND_REQUESTS_EMAIL = 2  # Email: "New friend requests" - friendinvite
+NOTIFICATION_FRIEND_REQUESTS_SMS = 4  # SMS: "New friend requests"
 # NOTIFICATION_SUGGESTED_FRIENDS = n/a  # In App: "Suggestions of people you may know"
-NOTIFICATION_SUGGESTED_FRIENDS_EMAIL = 8  # Email: "Suggestions of people you may know"
+NOTIFICATION_SUGGESTED_FRIENDS_EMAIL = 8  # Email: "Suggestions of people you may know" - suggestedfriend
 NOTIFICATION_SUGGESTED_FRIENDS_SMS = 16  # SMS: "Suggestions of people you may know"
 # NOTIFICATION_FRIEND_OPINIONS_YOUR_BALLOT = n/a  # In App: "Friends' opinions (on your ballot)"
-NOTIFICATION_FRIEND_OPINIONS_YOUR_BALLOT_EMAIL = 32  # Email: "Friends' opinions (on your ballot)"
+NOTIFICATION_FRIEND_OPINIONS_YOUR_BALLOT_EMAIL = 32  # Email: "Friends' opinions (on your ballot)" - friendopinions
 NOTIFICATION_FRIEND_OPINIONS_YOUR_BALLOT_SMS = 64  # SMS: "Friends' opinions (on your ballot)"
 NOTIFICATION_FRIEND_OPINIONS_OTHER_REGIONS = 128  # In App: "Friends' opinions (other regions)"
-NOTIFICATION_FRIEND_OPINIONS_OTHER_REGIONS_EMAIL = 256  # Email: "Friends' opinions (other regions)"
+NOTIFICATION_FRIEND_OPINIONS_OTHER_REGIONS_EMAIL = 256  # Email: "Friends' opinions (other regions)" - friendopinionsall
 NOTIFICATION_FRIEND_OPINIONS_OTHER_REGIONS_SMS = 512  # SMS: "Friends' opinions (other regions)"
 # NOTIFICATION_VOTER_DAILY_SUMMARY = n/a  # In App: When a friend posts something, or reacts to another post
-NOTIFICATION_VOTER_DAILY_SUMMARY_EMAIL = 1024  # Email: When a friend posts something, or reacts to another post
-NOTIFICATION_VOTER_DAILY_SUMMARY_SMS = 2048  # SMS: When a friend posts something, or reacts to another post
+NOTIFICATION_VOTER_DAILY_SUMMARY_EMAIL = 1024  # Email: When a friend posts something - dailyfriendactivity
+NOTIFICATION_VOTER_DAILY_SUMMARY_SMS = 2048  # SMS: When a friend posts something
+# TODO 2022-07-19 UPDATES NEEDED TO SUPPORT THESE NEW VALUES
+NOTIFICATION_FRIEND_REQUEST_RESPONSES_EMAIL = 4096  # Email: "Show me responses to my friend requests" - friendaccept
+NOTIFICATION_FRIEND_REQUEST_RESPONSES_SMS = 8192,  # SMS: "Show me responses to my friend requests"
+NOTIFICATION_LOGIN_EMAIL = 16384  # Email: "Show me email login requests" - login
+NOTIFICATION_LOGIN_SMS = 32768  # SMS: "Show me SMS login requests"
+NOTIFICATION_FRIEND_MESSAGES_EMAIL = 65536  # Email: "Show me messages from friends" - friendmessage
+NOTIFICATION_FRIEND_MESSAGES_SMS = 131072  # SMS: "Show me messages from friends"
 
 # Default to set for new voters
 NOTIFICATION_SETTINGS_FLAGS_DEFAULT = \
@@ -319,10 +326,13 @@ class VoterManager(BaseUserManager):
             google_last_name=None,
             ignore_contact=None,
             imported_by_voter_we_vote_id='',
+            is_friend=None,
             last_name=None,
             middle_name=None,
             state_code=None,
             zip_code=None,
+            phone_number=None,
+            api_type=None,
     ):
         """
 
@@ -339,10 +349,13 @@ class VoterManager(BaseUserManager):
         :param google_last_name:
         :param ignore_contact:
         :param imported_by_voter_we_vote_id:
+        :param is_friend:
         :param last_name:
         :param middle_name:
         :param state_code:
         :param zip_code:
+        :param phone_number,
+        :param api_type,
         :return:
         """
         status = ""
@@ -372,6 +385,8 @@ class VoterManager(BaseUserManager):
             try:
                 change_to_save = False
                 if positive_value_exists(from_google_people_api):
+                    # Sept 2022:  has_data_from_google_people_api assumed a different data structure for google and
+                    # apple, this variable will always be true
                     if not positive_value_exists(voter_contact_email.has_data_from_google_people_api):
                         voter_contact_email.has_data_from_google_people_api = True
                         change_to_save = True
@@ -395,6 +410,14 @@ class VoterManager(BaseUserManager):
                         if voter_contact_email.google_last_name != google_last_name:
                             voter_contact_email.google_last_name = google_last_name
                             change_to_save = True
+                    if phone_number is not None:
+                        if voter_contact_email.phone_number != phone_number:
+                            voter_contact_email.phone_number = phone_number
+                            change_to_save = True
+                    if api_type is not None:
+                        if voter_contact_email.api_type != api_type:
+                            voter_contact_email.api_type = api_type   # Might as well save the latest one
+                            change_to_save = True
                 if city is not None:
                     if voter_contact_email.city != city:
                         voter_contact_email.city = city
@@ -411,6 +434,10 @@ class VoterManager(BaseUserManager):
                 if ignore_contact is not None:
                     if voter_contact_email.ignore_contact != ignore_contact:
                         voter_contact_email.ignore_contact = ignore_contact
+                        change_to_save = True
+                if is_friend is not None:
+                    if voter_contact_email.is_friend != is_friend:
+                        voter_contact_email.is_friend = is_friend
                         change_to_save = True
                 if last_name is not None:
                     if voter_contact_email.last_name != last_name:
@@ -453,7 +480,9 @@ class VoterManager(BaseUserManager):
                         google_last_name=google_last_name,
                         has_data_from_google_people_api=True,
                         imported_by_voter_we_vote_id=imported_by_voter_we_vote_id,
-                        # state_code=state_code,
+                        state_code=state_code,
+                        phone_number=phone_number,
+                        api_type=api_type,
                     )
                 else:
                     status += "NOT_A_RECOGNIZED_CONTACT_TYPE "
@@ -467,6 +496,9 @@ class VoterManager(BaseUserManager):
                     return results
                 if ignore_contact is not None:
                     voter_contact_email.ignore_contact = ignore_contact
+                    change_to_save = True
+                if is_friend is not None:
+                    voter_contact_email.is_friend = is_friend
                     change_to_save = True
                 if change_to_save:
                     voter_contact_email.save()
@@ -710,8 +742,11 @@ class VoterManager(BaseUserManager):
         """
         voter = Voter()
         success = False
-        status = "Failed to create voter"
+        status = ""
         duplicate_email = False
+        email_address_object_created = False
+        email_address_we_vote_id = ''
+        voter_created = False
         try:
             voter.set_password(password)
             voter.first_name = first_name
@@ -725,20 +760,50 @@ class VoterManager(BaseUserManager):
             voter.is_verified_volunteer = is_verified_volunteer
             voter.is_active = True
             voter.save()
+            voter_created = True
             success = True
-            status = "Created voter " + voter.we_vote_id
+            status = "Created voter " + str(voter.we_vote_id) + " "
             logger.debug("create_new_voter_account successfully created (voter) : " + first_name)
-
         except IntegrityError as e:
-            status += ", " + str(e)
+            status += "FAILED_TO_CREATE_VOTER_INTEGRITY: " + str(e) + " "
             handle_record_not_saved_exception(e, logger=logger)
             print("create_new_voter_account IntegrityError exception:" + str(e))
             if "voter_voter_email_key" in str(e):
                 duplicate_email = True
         except Exception as e:
-            status += ", " + str(e)
+            status += "FAILED_TO_CREATE_VOTER: " + str(e) + " "
             handle_record_not_saved_exception(e, logger=logger)
             logger.debug("create_new_voter_account general exception: " + str(e))
+
+        if voter_created:
+            try:
+                from email_outbound.models import EmailManager
+                email_manager = EmailManager()
+                email_results = email_manager.create_email_address(
+                    normalized_email_address=email,
+                    voter_we_vote_id=voter.we_vote_id,
+                    email_ownership_is_verified=True,
+                )
+                email_address_object_created = True
+                status += email_results['status']
+                if email_results['email_address_object_saved']:
+                    email_address_object = email_results['email_address_object']
+                    email_address_we_vote_id = email_address_object.we_vote_id
+            except Exception as e:
+                status += "FAILED_TO_CREATE_VOTER_EMAIL_ADDRESS: " + str(e) + " "
+                handle_record_not_saved_exception(e, logger=logger)
+                logger.debug("ERROR_SAVING_NEW_EMAIL create_new_voter_account general exception: " + str(e))
+
+        if email_address_object_created:
+            try:
+                voter.email_ownership_is_verified = True
+                voter.primary_email_we_vote_id = email_address_we_vote_id
+                voter.save()
+                status += "VOTER_CREATED_EMAIL_OWNERSHIP_VERIFIED "
+            except Exception as e:
+                status += "FAILED_TO_UPDATE_VOTER_WITH_EMAIL_ADDRESS: " + str(e) + " "
+                handle_record_not_saved_exception(e, logger=logger)
+                logger.debug("ERROR_SAVING_NEW_EMAIL create_new_voter_account general exception: " + str(e))
 
         results = {
             'success': success,
@@ -1021,7 +1086,9 @@ class VoterManager(BaseUserManager):
         email_addresses_returned_list = []
         if voter_contact_email_list_found:
             for voter_contact_email in voter_contact_email_list:
-                email_addresses_returned_list.append(voter_contact_email.email_address_text)
+                email_address_text_lower_case = voter_contact_email.email_address_text.lower()
+                if email_address_text_lower_case not in email_addresses_returned_list:
+                    email_addresses_returned_list.append(email_address_text_lower_case)
 
         results = {
             'success':                          success,
@@ -1160,7 +1227,7 @@ class VoterManager(BaseUserManager):
 
         facebook_manager = FacebookManager()
         facebook_link_results = facebook_manager.retrieve_facebook_link_to_voter_from_facebook_id(
-            facebook_id)
+            facebook_id, read_only=True)
         if not facebook_link_results['facebook_link_to_voter_found']:
             # We don't have an official FacebookLinkToVoter, so we don't want to clean up any caching
             status += "FACEBOOK_LINK_TO_VOTER_NOT_FOUND-CACHING_REPAIR_NOT_EXECUTED "
@@ -1229,7 +1296,7 @@ class VoterManager(BaseUserManager):
             # Now make sure that the voter table has values for the voter linked with the
             # official FacebookLinkToVoter
             voter_results = self.retrieve_voter_by_we_vote_id(
-                facebook_link_to_voter.voter_we_vote_id)
+                facebook_link_to_voter.voter_we_vote_id, read_only=False)
             if not voter_results['voter_found']:
                 status += "REPAIR_FACEBOOK_CACHING-COULD_NOT_UPDATE_LINKED_VOTER "
             else:
@@ -1450,7 +1517,7 @@ class VoterManager(BaseUserManager):
         voter_we_vote_id = ''
 
         facebook_manager = FacebookManager()
-        facebook_retrieve_results = facebook_manager.retrieve_facebook_link_to_voter(facebook_id)
+        facebook_retrieve_results = facebook_manager.retrieve_facebook_link_to_voter(facebook_id, read_only=True)
         if facebook_retrieve_results['facebook_link_to_voter_found']:
             facebook_link_to_voter = facebook_retrieve_results['facebook_link_to_voter']
             voter_we_vote_id = facebook_link_to_voter.voter_we_vote_id
@@ -3207,7 +3274,7 @@ class Voter(AbstractBaseUser):
 
     def signed_in_facebook(self):
         facebook_manager = FacebookManager()
-        facebook_link_results = facebook_manager.retrieve_facebook_link_to_voter(0, self.we_vote_id)
+        facebook_link_results = facebook_manager.retrieve_facebook_link_to_voter(0, self.we_vote_id, read_only=True)
         if facebook_link_results['facebook_link_to_voter_found']:
             facebook_link_to_voter = facebook_link_results['facebook_link_to_voter']
             if positive_value_exists(facebook_link_to_voter.facebook_user_id):
@@ -3228,7 +3295,7 @@ class Voter(AbstractBaseUser):
 
     def signed_in_with_apple(self):
         try:
-            apple_object = AppleUser.objects.get(voter_we_vote_id__iexact=self.we_vote_id)
+            apple_object = AppleUser.objects.using('readonly').get(voter_we_vote_id__iexact=self.we_vote_id)
             return True
         except AppleUser.DoesNotExist:
             return False
@@ -3373,13 +3440,15 @@ class VoterContactEmail(models.Model):
     has_data_from_google_people_api = models.BooleanField(default=False)
     ignore_contact = models.BooleanField(default=False)
     imported_by_voter_we_vote_id = models.CharField(max_length=255, default=None, null=True, db_index=True)
+    is_friend = models.BooleanField(default=False)
     last_name = models.CharField(max_length=255, default=None, null=True)
     middle_name = models.CharField(max_length=255, default=None, null=True)
     state_code = models.CharField(max_length=2, default=None, null=True, db_index=True)
     voter_we_vote_id = models.CharField(max_length=255, default=None, null=True, db_index=True)
     we_vote_hosted_profile_image_url_medium = models.TextField(blank=True, null=True)
     zip_code = models.CharField(max_length=10, default=None, null=True)
-
+    phone_number = models.CharField(verbose_name="contact phone number", max_length=64, null=True, blank=True)
+    api_type = models.CharField(verbose_name="apple google android etc", max_length=16, default="google")
 
 # class VoterContactSMS(models.Model):
 #     """
@@ -3844,7 +3913,8 @@ class VoterDeviceLinkManager(models.Manager):
             generate_new_secret_code=False,
             delete_secret_code=False,
             email_secret_key=False,
-            sms_secret_key=False):
+            sms_secret_key=False,
+            called_recursively=False):
         """
         Update existing voter_device_link with a new voter_id or google_civic_election_id
         """
@@ -3855,6 +3925,8 @@ class VoterDeviceLinkManager(models.Manager):
         missing_required_variables = False
         voter_device_link_id = 0
 
+        if positive_value_exists(called_recursively):
+            status += "UPDATING_VOTER_DEVICE_LINK_RECURSIVELY "
         try:
             if positive_value_exists(voter_device_link.voter_device_id):
                 if voter_object and positive_value_exists(voter_object.id):
@@ -3888,6 +3960,35 @@ class VoterDeviceLinkManager(models.Manager):
                 missing_required_variables = True
                 voter_device_link_id = 0
                 status += "UPDATE-MISSING_VOTER_DEVICE_ID "
+        except IntegrityError as e:
+            handle_record_not_saved_exception(e, logger=logger)
+            error_result = True
+            exception_record_not_saved = True
+            status += "UPDATE_VOTER_DEVICE_INTEGRITY_ERROR: " + str(e) + " "
+            success = False
+            # There are three fields which require that they are unique
+            # If voter tries to sign in with an email, the email_secret_key gets attached to that voter_device_link
+            # If voter clears out cookies, and then tries to sign in again with the same email, we need to be able
+            #  to clear out email_secret_key so voter can sign in in other browser
+            # If this is a secondary recursive call of this function, don't proceed
+            if positive_value_exists(email_secret_key) and not positive_value_exists(called_recursively):
+                # status += "CLEARING_EMAIL_SECRET_KEY "
+                status += "NEED_TO_CLEAR_EMAIL_SECRET_KEY-BUT_NOT_FOR_NOW "
+                voter_device_link_manager = VoterDeviceLinkManager()
+                clear_results = voter_device_link_manager.clear_secret_key(email_secret_key=email_secret_key)
+                if clear_results['success']:
+                    save_results = voter_device_link_manager.update_voter_device_link(
+                        voter_device_link=voter_device_link,
+                        voter_object=voter_object,
+                        google_civic_election_id=google_civic_election_id,
+                        state_code=state_code,
+                        generate_new_secret_code=generate_new_secret_code,
+                        delete_secret_code=delete_secret_code,
+                        email_secret_key=email_secret_key,
+                        sms_secret_key=sms_secret_key,
+                        called_recursively=True,
+                    )
+                    return save_results
         except Exception as e:
             handle_record_not_saved_exception(e, logger=logger)
             error_result = True

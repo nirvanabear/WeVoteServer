@@ -47,17 +47,19 @@ def delete_activity_comments_for_voter(voter_to_delete_we_vote_id, from_organiza
         return results
 
     try:
-        activity_comment_entries_deleted += ActivityComment.objects\
+        delete_tuple = ActivityComment.objects\
             .filter(commenter_voter_we_vote_id__iexact=voter_to_delete_we_vote_id)\
             .delete()
+        activity_comment_entries_deleted += delete_tuple[0]
     except Exception as e:
         status += "FAILED-ACTIVITY_COMMENT_UPDATE-INCLUDING_ORG_UPDATE " + str(e) + " "
     # #############################################
     # Delete based on organization_we_vote_id
     try:
-        activity_comment_entries_deleted += ActivityComment.objects \
+        delete_tuple = ActivityComment.objects \
             .filter(commenter_organization_we_vote_id__iexact=from_organization_we_vote_id) \
             .delete()
+        activity_comment_entries_deleted += delete_tuple[0]
     except Exception as e:
         status += "FAILED-ACTIVITY_COMMENT_DELETE-FROM_ORG_WE_VOTE_ID " + str(e) + " "
 
@@ -89,37 +91,42 @@ def delete_activity_notices_for_voter(voter_to_delete_we_vote_id, from_organizat
         return results
 
     try:
-        activity_notice_seed_entries_deleted += ActivityNoticeSeed.objects\
+        delete_tuple = ActivityNoticeSeed.objects\
             .filter(speaker_voter_we_vote_id__iexact=voter_to_delete_we_vote_id)\
             .delete()
+        activity_notice_seed_entries_deleted += delete_tuple[0]
     except Exception as e:
-        status += "FAILED-ACTIVITY_NOTICE_SEED_UPDATE-INCLUDING_ORG_UPDATE " + str(e) + " "
+        status += "FAILED-ACTIVITY_NOTICE_SEED_UPDATE_INCLUDING_ORG_UPDATE1 " + str(e) + " "
     try:
-        activity_notice_entries_deleted += ActivityNotice.objects\
+        delete_tuple = ActivityNotice.objects\
             .filter(speaker_voter_we_vote_id__iexact=voter_to_delete_we_vote_id) \
             .delete()
+        activity_notice_entries_deleted += delete_tuple[0]
     except Exception as e:
         status += "FAILED-ACTIVITY_NOTICE_UPDATE-INCLUDING_ORG_UPDATE " + str(e) + " "
     # #############################################
     # Delete based on speaker_organization_we_vote_id
     try:
-        activity_notice_seed_entries_deleted += ActivityNoticeSeed.objects \
+        delete_tuple = ActivityNoticeSeed.objects \
             .filter(speaker_organization_we_vote_id__iexact=from_organization_we_vote_id) \
             .delete()
+        activity_notice_seed_entries_deleted += delete_tuple[0]
     except Exception as e:
         status += "FAILED-ACTIVITY_NOTICE_SEED_UPDATE-FROM_ORG_WE_VOTE_ID " + str(e) + " "
     try:
-        activity_notice_entries_deleted += ActivityNotice.objects \
+        delete_tuple = ActivityNotice.objects \
             .filter(speaker_organization_we_vote_id__iexact=from_organization_we_vote_id) \
             .delete()
+        activity_notice_entries_deleted += delete_tuple[0]
     except Exception as e:
         status += "FAILED-ACTIVITY_NOTICE_UPDATE-FROM_ORG_WE_VOTE_ID " + str(e) + " "
 
     # Now move ActivityNotice recipient_voter_we_vote_id
     try:
-        activity_notice_entries_deleted += ActivityNotice.objects \
+        delete_tuple = ActivityNotice.objects \
             .filter(recipient_voter_we_vote_id__iexact=voter_to_delete_we_vote_id) \
             .delete()
+        activity_notice_entries_deleted += delete_tuple[0]
     except Exception as e:
         status += "FAILED-ACTIVITY_NOTICE_UPDATE-RECIPIENT " + str(e) + " "
 
@@ -150,17 +157,19 @@ def delete_activity_posts_for_voter(voter_to_delete_we_vote_id, from_organizatio
         return results
 
     try:
-        activity_post_entries_deleted += ActivityPost.objects\
+        delete_tuple = ActivityPost.objects\
             .filter(speaker_voter_we_vote_id__iexact=voter_to_delete_we_vote_id)\
             .delete()
+        activity_post_entries_deleted += delete_tuple[0]
     except Exception as e:
         status += "FAILED-ACTIVITY_POST_UPDATE-INCLUDING_ORG_UPDATE " + str(e) + " "
     # #############################################
     # Delete based on speaker_organization_we_vote_id
     try:
-        activity_post_entries_deleted += ActivityPost.objects \
+        delete_tuple = ActivityPost.objects \
             .filter(speaker_organization_we_vote_id__iexact=from_organization_we_vote_id) \
             .delete()
+        activity_post_entries_deleted += delete_tuple[0]
     except Exception as e:
         status += "FAILED-ACTIVITY_POST_DELETE-FROM_ORG_WE_VOTE_ID " + str(e) + " "
 
@@ -318,7 +327,7 @@ def move_activity_notices_to_another_voter(
                         speaker_profile_image_url_medium=speaker_profile_image_url_medium,
                         speaker_profile_image_url_tiny=speaker_profile_image_url_tiny)
         except Exception as e:
-            status += "FAILED-ACTIVITY_NOTICE_SEED_UPDATE-INCLUDING_ORG_UPDATE: " + str(e) + " "
+            status += "FAILED-ACTIVITY_NOTICE_SEED_UPDATE_INCLUDING_ORG_UPDATE2: " + str(e) + " "
         try:
             activity_notice_entries_moved += ActivityNotice.objects\
                 .filter(speaker_voter_we_vote_id__iexact=from_voter_we_vote_id) \
@@ -621,6 +630,28 @@ def notice_friend_endorsements_send(
             # subject += " is getting ready to vote"
             activity_description += "is reviewing the ballot"
 
+        # "recipient_unsubscribe_url":    web_app_root_url_verified + "/settings/notifications/esk/" +
+        # recipient_email_subscription_secret_key,
+
+        # Unsubscribe link in email
+        recipient_unsubscribe_url = \
+            "{root_url}/unsubscribe/{email_secret_key}/friendopinionsall" \
+            "".format(
+                email_secret_key=recipient_email_subscription_secret_key,
+                root_url=web_app_root_url_verified,
+            )
+        # Instant unsubscribe link in email header
+        list_unsubscribe_url = \
+            "{root_url}/apis/v1/unsubscribeInstant/{email_secret_key}/friendopinionsall/" \
+            "".format(
+                email_secret_key=recipient_email_subscription_secret_key,
+                root_url=WE_VOTE_SERVER_ROOT_URL,
+            )
+        # Instant unsubscribe email address in email header
+        # from voter.models import NOTIFICATION_FRIEND_OPINIONS_OTHER_REGIONS_EMAIL
+        list_unsubscribe_mailto = "unsubscribe@wevote.us?subject=unsubscribe%20{setting}" \
+                                  "".format(setting='friendopinionsall')
+
         # Variables used by templates/email_outbound/email_templates/notice_friend_endorsements.txt and .html
         template_variables_for_json = {
             "activity_description":         activity_description,
@@ -632,10 +663,8 @@ def notice_friend_endorsements_send(
             "sender_description":           speaker_voter_description,
             "sender_network_details":       speaker_voter_network_details,
             "recipient_name":               recipient_name,
+            "recipient_unsubscribe_url":    recipient_unsubscribe_url,
             "recipient_voter_email":        recipient_email,
-            "recipient_unsubscribe_url":    web_app_root_url_verified + "/settings/notifications/esk/" +
-            recipient_email_subscription_secret_key,
-            "email_open_url":               WE_VOTE_SERVER_ROOT_URL + "/apis/v1/emailOpen?email_key=1234",
             "view_new_endorsements_url":    web_app_root_url_verified + "/news/a/" + activity_tidbit_we_vote_id,
             "view_your_ballot_url":         web_app_root_url_verified + "/ballot",
         }
@@ -651,7 +680,10 @@ def notice_friend_endorsements_send(
             recipient_email_we_vote_id=recipient_email_we_vote_id,
             recipient_voter_email=recipient_email,
             template_variables_in_json=template_variables_in_json,
-            kind_of_email_template=kind_of_email_template)
+            kind_of_email_template=kind_of_email_template,
+            list_unsubscribe_mailto=list_unsubscribe_mailto,
+            list_unsubscribe_url=list_unsubscribe_url,
+        )
         status += outbound_results['status'] + " "
         success = outbound_results['success']
         if outbound_results['email_outbound_description_saved']:
@@ -894,22 +926,41 @@ def notice_voter_daily_summary_send(  # NOTICE_VOTER_DAILY_SUMMARY
         if not positive_value_exists(subject):
             subject = "Your friends have commented"
 
+        # Unsubscribe link in email
+        # "recipient_unsubscribe_url":    web_app_root_url_verified + "/settings/notifications/esk/" +
+        # recipient_email_subscription_secret_key,
+        recipient_unsubscribe_url = \
+            "{root_url}/unsubscribe/{email_secret_key}/dailyfriendactivity" \
+            "".format(
+                email_secret_key=recipient_email_subscription_secret_key,
+                root_url=web_app_root_url_verified,
+            )
+        # Instant unsubscribe link in email header
+        list_unsubscribe_url = \
+            "{root_url}/apis/v1/unsubscribeInstant/{email_secret_key}/dailyfriendactivity/" \
+            "".format(
+                email_secret_key=recipient_email_subscription_secret_key,
+                root_url=WE_VOTE_SERVER_ROOT_URL,
+            )
+        # Instant unsubscribe email address in email header
+        # from voter.models import NOTIFICATION_VOTER_DAILY_SUMMARY_EMAIL
+        list_unsubscribe_mailto = "unsubscribe@wevote.us?subject=unsubscribe%20{setting}" \
+                                  "".format(setting='dailyfriendactivity')
+
         template_variables_for_json = {
-            "introduction_line":            introduction_line,
-            "subject":                      subject,
-            "friend_activity_dict_list":    friend_activity_dict_list_modified,
+            "introduction_line":                introduction_line,
+            "subject":                          subject,
+            "friend_activity_dict_list":        friend_activity_dict_list_modified,
             # "sender_name":                  speaker_voter_name,
             # "sender_photo":                 speaker_voter_photo,
             # "sender_email_address":         speaker_voter_email,  # Does not affect the "From" email header
             # "sender_description":           speaker_voter_description,
             # "sender_network_details":       speaker_voter_network_details,
-            "recipient_name":               recipient_name,
-            "recipient_voter_email":        recipient_email,
-            "recipient_unsubscribe_url":    web_app_root_url_verified + "/settings/notifications/esk/" +
-            recipient_email_subscription_secret_key,
-            "email_open_url":               WE_VOTE_SERVER_ROOT_URL + "/apis/v1/emailOpen?email_key=1234",
+            "recipient_name":                   recipient_name,
+            "recipient_unsubscribe_url":        recipient_unsubscribe_url,
+            "recipient_voter_email":            recipient_email,
             "view_main_discussion_page_url":    web_app_root_url_verified + "/news",
-            "view_your_ballot_url":         web_app_root_url_verified + "/ballot",
+            "view_your_ballot_url":             web_app_root_url_verified + "/ballot",
         }
         template_variables_in_json = json.dumps(template_variables_for_json, ensure_ascii=True)
         from_email_for_daily_summary = "We Vote <info@WeVote.US>"  # TODO DALE Make system variable
@@ -924,7 +975,10 @@ def notice_voter_daily_summary_send(  # NOTICE_VOTER_DAILY_SUMMARY
             recipient_email_we_vote_id=recipient_email_we_vote_id,
             recipient_voter_email=recipient_email,
             template_variables_in_json=template_variables_in_json,
-            kind_of_email_template=kind_of_email_template)
+            kind_of_email_template=kind_of_email_template,
+            list_unsubscribe_mailto=list_unsubscribe_mailto,
+            list_unsubscribe_url=list_unsubscribe_url,
+        )
         status += outbound_results['status'] + " "
         success = outbound_results['success']
         if outbound_results['email_outbound_description_saved']:

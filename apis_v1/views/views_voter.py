@@ -13,8 +13,9 @@ from config.base import get_environment_variable
 from django.views.decorators.csrf import csrf_exempt
 from django.http import HttpResponse
 from django_user_agents.utils import get_user_agent
-from email_outbound.controllers import voter_email_address_save_for_api, voter_email_address_retrieve_for_api, \
-    voter_email_address_sign_in_for_api, voter_email_address_verify_for_api
+from email_outbound.controllers import voter_email_address_retrieve_for_api, voter_email_address_save_for_api, \
+    voter_email_address_send_sign_in_code_email_for_api, voter_email_address_sign_in_for_api, \
+    voter_email_address_verify_for_api
 from email_outbound.models import EmailAddress, EmailManager
 from wevote_functions.functions import extract_first_name_from_full_name, extract_last_name_from_full_name
 from follow.controllers import voter_issue_follow_for_api
@@ -33,7 +34,8 @@ from sms.controllers import voter_sms_phone_number_retrieve_for_api, voter_sms_p
 from sms.models import SMSManager
 from support_oppose_deciding.controllers import voter_opposing_save, voter_stop_opposing_save, \
     voter_stop_supporting_save, voter_supporting_save_for_api
-from voter.controllers import voter_address_retrieve_for_api, voter_create_for_api, voter_merge_two_accounts_for_api, \
+from voter.controllers import delete_all_voter_information_permanently, \
+    voter_address_retrieve_for_api, voter_create_for_api, voter_merge_two_accounts_for_api, \
     voter_merge_two_accounts_action, voter_photo_save_for_api, voter_retrieve_for_api, \
     voter_save_photo_from_file_reader, voter_sign_out_for_api, voter_split_into_two_accounts_for_api
 from voter.controllers_contacts import delete_all_voter_contact_emails_for_voter, save_google_contacts, \
@@ -51,6 +53,81 @@ from apis_v1.views import views_voter_utils
 logger = wevote_functions.admin.get_logger(__name__)
 
 WE_VOTE_SERVER_ROOT_URL = get_environment_variable("WE_VOTE_SERVER_ROOT_URL")
+
+
+@csrf_exempt
+def unsubscribe_instant_view(request, subscription_secret_key='', unsubscribe_modifier=''):
+    status = ''
+    if not positive_value_exists(subscription_secret_key) or not positive_value_exists(unsubscribe_modifier):
+        status += "MISSING_REQUIRED_UNSUBSCRIBE_VARIABLES "
+        return HttpResponse('failure ' + status, content_type='text/html')
+
+    email_manager = EmailManager()
+    voter_manager = VoterManager()
+    email_results = email_manager.retrieve_email_address_object_from_secret_key(
+        subscription_secret_key=subscription_secret_key)
+    if email_results['email_address_object_found']:
+        status += "UNSUBSCRIBE_INSTANT-EMAIL_ADDRESS_FOUND "
+        email_address_object = email_results['email_address_object']
+        voter_results = voter_manager.retrieve_voter_by_we_vote_id(email_address_object.voter_we_vote_id)
+        voter_id = voter_results['voter_id']
+    else:
+        status += "EMAIL_ADDRESS_NOT_FOUND "
+        return HttpResponse('failure ' + status, content_type='text/html')
+
+    notification_flag_integer_to_unset = 0
+    from voter.models import NOTIFICATION_FRIEND_MESSAGES_EMAIL, NOTIFICATION_FRIEND_OPINIONS_OTHER_REGIONS_EMAIL, \
+        NOTIFICATION_FRIEND_OPINIONS_YOUR_BALLOT_EMAIL, NOTIFICATION_FRIEND_REQUEST_RESPONSES_EMAIL, \
+        NOTIFICATION_FRIEND_REQUESTS_EMAIL, NOTIFICATION_LOGIN_EMAIL, NOTIFICATION_NEWSLETTER_OPT_IN, \
+        NOTIFICATION_SUGGESTED_FRIENDS_EMAIL, NOTIFICATION_VOTER_DAILY_SUMMARY_EMAIL
+    # NOTIFICATION_VOTER_DAILY_SUMMARY_EMAIL = 1024  # When a friend posts something - dailyfriendactivity
+    # NOTIFICATION_FRIEND_REQUEST_RESPONSES_EMAIL = 4096  # "Show me responses to my friend requests" - friendaccept
+    # NOTIFICATION_FRIEND_REQUESTS_EMAIL = 2  # "New friend requests" - friendinvite
+    # NOTIFICATION_FRIEND_MESSAGES_EMAIL = 65536  # "Show me messages from friends" - friendmessage
+    # NOTIFICATION_FRIEND_OPINIONS_YOUR_BALLOT_EMAIL = 32  # "Friends' opinions (on your ballot)" - friendopinions
+    # NOTIFICATION_FRIEND_OPINIONS_OTHER_REGIONS_EMAIL = 256  # "Friends' opinions (other regions)" - friendopinionsall
+    # NOTIFICATION_LOGIN_EMAIL = 16384  # "Show me email login requests" - login
+    # NOTIFICATION_NEWSLETTER_OPT_IN = 1  # "I would like to receive the We Vote newsletter" - newsletter
+    # NOTIFICATION_SUGGESTED_FRIENDS_EMAIL = 8  # "Suggestions of people you may know" - suggestedfriend
+    if unsubscribe_modifier == 'dailyfriendactivity':
+        notification_flag_integer_to_unset = NOTIFICATION_VOTER_DAILY_SUMMARY_EMAIL
+    elif unsubscribe_modifier == 'friendaccept':
+        notification_flag_integer_to_unset = NOTIFICATION_FRIEND_REQUEST_RESPONSES_EMAIL
+    elif unsubscribe_modifier == 'friendinvite':
+        notification_flag_integer_to_unset = NOTIFICATION_FRIEND_REQUESTS_EMAIL
+    elif unsubscribe_modifier == 'friendmessage':
+        notification_flag_integer_to_unset = NOTIFICATION_FRIEND_MESSAGES_EMAIL
+    elif unsubscribe_modifier == 'friendopinions':
+        notification_flag_integer_to_unset = NOTIFICATION_FRIEND_OPINIONS_YOUR_BALLOT_EMAIL
+    elif unsubscribe_modifier == 'friendopinionsall':
+        notification_flag_integer_to_unset = NOTIFICATION_FRIEND_OPINIONS_OTHER_REGIONS_EMAIL
+    elif unsubscribe_modifier == 'login':
+        notification_flag_integer_to_unset = NOTIFICATION_LOGIN_EMAIL
+    elif unsubscribe_modifier == 'newsletter':
+        notification_flag_integer_to_unset = NOTIFICATION_NEWSLETTER_OPT_IN
+    elif unsubscribe_modifier == 'suggestedfriend':
+        notification_flag_integer_to_unset = NOTIFICATION_SUGGESTED_FRIENDS_EMAIL
+
+    if not positive_value_exists(notification_flag_integer_to_unset):
+        status += "UNSUBSCRIBE_MODIFIER_NOT_VALID "
+        return HttpResponse('failure ' + status, content_type='text/html')
+
+    if not positive_value_exists(voter_id):
+        # TODO This doesn't take into consideration 'friendinvite' which is sent to a person
+        #  before a voter object exists. We need a way to let voter's block messages
+        #  if they aren't users of We Vote
+        status += "VOTER_ID_NOT_FOUND "
+        return HttpResponse('failure ' + status, content_type='text/html')
+
+    results = voter_manager.update_voter_by_id(
+        voter_id,
+        notification_flag_integer_to_unset=notification_flag_integer_to_unset)
+    status += results['status']
+    success = results['success']
+    if not success:
+        return HttpResponse('failure ' + status, content_type='text/html')
+
+    return HttpResponse('success', content_type='text/html')
 
 
 def voter_address_retrieve_view(request):  # voterAddressRetrieve
@@ -876,19 +953,51 @@ def voter_create_new_account_view(request):  # voterCreateNewAccount
         is_verified_volunteer = request.GET.get('is_verified_volunteer', False) == 'true'
 
         # Check to make sure email isn't attached to existing account in EmailAddress table
-        email_address_queryset = EmailAddress.objects.all()
-        email_address_queryset = email_address_queryset.filter(
-            normalized_email_address__iexact=email,
-            deleted=False
+        existing_voter_found = False
+        email_manager = EmailManager()
+        voter = None
+        voter_manager = VoterManager()
+        existing_email_results = email_manager.retrieve_primary_email_with_ownership_verified(
+            normalized_email_address=email,
         )
-        email_address_list = list(email_address_queryset)
-        email_already_in_use = True if len(email_address_list) > 0 else False
-        if email_already_in_use:
-            status += "EMAIL_ADDRESS_ALREADY_IN_USE "
+        if existing_email_results['email_address_object_found']:
+            email_address_object = existing_email_results['email_address_object']
+            voter_we_vote_id = email_address_object.voter_we_vote_id
+            voter_results = voter_manager.retrieve_voter_by_we_vote_id(voter_we_vote_id)
+            if voter_results['voter_found']:
+                voter = voter_results['voter']
+                existing_voter_found = True
+        else:
+            voter_results = voter_manager.retrieve_voter_by_email(email)
+            if voter_results['voter_found']:
+                voter = voter_results['voter']
+                existing_voter_found = True
+
+        if existing_voter_found:
+            voter.set_password(password)
+            if is_admin:
+                voter.is_admin = True
+            if is_analytics_admin:
+                voter.is_analytics_admin = True
+            if is_partner_organization:
+                voter.is_partner_organization = True
+            if is_political_data_manager:
+                voter.is_political_data_manager = True
+            if is_political_data_viewer:
+                voter.is_political_data_viewer = True
+            if is_verified_volunteer:
+                voter.is_verified_volunteer = True
+            if not positive_value_exists(voter.first_name) and positive_value_exists(first_name):
+                voter.first_name = first_name
+            if not positive_value_exists(voter.last_name) and positive_value_exists(last_name):
+                voter.last_name = last_name
+            voter.save()
+
+            status += "EMAIL_ADDRESS_ALREADY_IN_USE-UPDATED_VOTER "
             json_data = {
                 'status':           status,
-                'success':          False,
-                'duplicate_email':  True,
+                'success':          True,
+                'duplicate_email':  False,
                 'has_permission':   True,
             }
         else:
@@ -948,19 +1057,26 @@ def voter_email_address_save_view(request):  # voterEmailAddressSave
     is_cordova = positive_value_exists(request.GET.get('is_cordova', False))
     hostname = request.GET.get('hostname', '')
 
-    results = voter_email_address_save_for_api(
-        voter_device_id=voter_device_id,
-        text_for_email_address=text_for_email_address,
-        incoming_email_we_vote_id=incoming_email_we_vote_id,
-        send_link_to_sign_in=send_link_to_sign_in,
-        send_sign_in_code_email=send_sign_in_code_email,
-        resend_verification_email=resend_verification_email,
-        resend_verification_code_email=resend_verification_code_email,
-        make_primary_email=make_primary_email,
-        delete_email=delete_email,
-        is_cordova=is_cordova,
-        web_app_root_url=hostname,
-        )
+    if positive_value_exists(send_sign_in_code_email):
+        results = voter_email_address_send_sign_in_code_email_for_api(
+            voter_device_id=voter_device_id,
+            text_for_email_address=text_for_email_address,
+            web_app_root_url=hostname,
+            )
+    else:
+        results = voter_email_address_save_for_api(
+            voter_device_id=voter_device_id,
+            text_for_email_address=text_for_email_address,
+            incoming_email_we_vote_id=incoming_email_we_vote_id,
+            send_link_to_sign_in=send_link_to_sign_in,
+            send_sign_in_code_email=send_sign_in_code_email,
+            resend_verification_email=resend_verification_email,
+            resend_verification_code_email=resend_verification_code_email,
+            make_primary_email=make_primary_email,
+            delete_email=delete_email,
+            is_cordova=is_cordova,
+            web_app_root_url=hostname,
+            )
 
     json_data = {
         'status':                           results['status'],
@@ -970,7 +1086,6 @@ def voter_email_address_save_view(request):  # voterEmailAddressSave
         'make_primary_email':               make_primary_email,
         'delete_email':                     delete_email,
         'email_address_we_vote_id':         results['email_address_we_vote_id'],
-        'email_address_saved_we_vote_id':   results['email_address_saved_we_vote_id'],
         'email_address_already_owned_by_other_voter':   results['email_address_already_owned_by_other_voter'],
         'email_address_already_owned_by_this_voter':    results['email_address_already_owned_by_this_voter'],
         'email_address_created':            results['email_address_created'],
@@ -1022,9 +1137,19 @@ def voter_email_address_verify_view(request):  # voterEmailAddressVerify
     """
     voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
     email_secret_key = request.GET.get('email_secret_key', '')
+    # We are currently not using incoming variables "first_name_changed", "last_name_changed" or "full_name_changed"
+    first_name, first_name_changed = return_string_value_and_changed_boolean_from_get(request, 'first_name')
+    last_name, last_name_changed = return_string_value_and_changed_boolean_from_get(request, 'last_name')
+    full_name, full_name_changed = return_string_value_and_changed_boolean_from_get(request, 'full_name')
 
-    results = voter_email_address_verify_for_api(voter_device_id=voter_device_id,
-                                                 email_secret_key=email_secret_key)
+    results = voter_email_address_verify_for_api(
+        voter_device_id=voter_device_id,
+        email_secret_key=email_secret_key,
+        first_name=first_name,
+        last_name=last_name,
+        full_name=full_name,
+        name_save_only_if_no_existing_names=True,
+    )
 
     json_data = {
         'status':                           results['status'],
@@ -1187,22 +1312,26 @@ def voter_merge_two_accounts_view(request):  # voterMergeTwoAccounts
     :return:
     """
     voter_device_id = get_voter_device_id(request)  # We standardize how we take in the voter_device_id
+    do_not_merge_if_currently_signed_in = request.GET.get('do_not_merge_if_currently_signed_in', '')
     email_secret_key = request.GET.get('email_secret_key', '')
     facebook_secret_key = request.GET.get('facebook_secret_key', '')
     twitter_secret_key = request.GET.get('twitter_secret_key', '')
     invitation_secret_key = request.GET.get('invitation_secret_key', '')
     hostname = request.GET.get('hostname', '')
 
-    results = voter_merge_two_accounts_for_api(voter_device_id=voter_device_id,
-                                               email_secret_key=email_secret_key,
-                                               facebook_secret_key=facebook_secret_key,
-                                               twitter_secret_key=twitter_secret_key,
-                                               invitation_secret_key=invitation_secret_key,
-                                               web_app_root_url=hostname)
+    results = voter_merge_two_accounts_for_api(
+        voter_device_id=voter_device_id,
+        email_secret_key=email_secret_key,
+        facebook_secret_key=facebook_secret_key,
+        twitter_secret_key=twitter_secret_key,
+        invitation_secret_key=invitation_secret_key,
+        do_not_merge_if_currently_signed_in=do_not_merge_if_currently_signed_in,
+        web_app_root_url=hostname)
 
     json_data = {
         'status':                           results['status'],
         'success':                          results['success'],
+        'email_owner_voter_found':          results['email_owner_voter_found'],
         'voter_device_id':                  voter_device_id,
     }
     return HttpResponse(json.dumps(json_data), content_type='application/json')
@@ -2095,6 +2224,7 @@ def voter_update_view(request):  # voterUpdate
     is_post = True if request.method == 'POST' else False
 
     if is_post:
+        delete_voter_account = positive_value_exists(request.POST.get('delete_voter_account', False))
         facebook_email_changed = positive_value_exists(request.POST.get('facebook_email_changed', False))
         facebook_email = request.POST.get('facebook_email', '') if facebook_email_changed else False
         facebook_profile_image_url_https_changed = \
@@ -2133,6 +2263,7 @@ def voter_update_view(request):  # voterUpdate
         profile_image_type_currently_active_changed = \
             positive_value_exists(request.POST.get('profile_image_type_currently_active_changed', False))
     else:
+        delete_voter_account = positive_value_exists(request.GET.get('delete_voter_account', False))
         facebook_email, facebook_email_changed = \
             return_string_value_and_changed_boolean_from_get(request, 'facebook_email')
         facebook_profile_image_url_https, facebook_profile_image_url_https_changed = \
@@ -2225,7 +2356,7 @@ def voter_update_view(request):  # voterUpdate
         else False
 
     voter_manager = VoterManager()
-    voter_results = voter_manager.retrieve_voter_from_voter_device_id(voter_device_id)
+    voter_results = voter_manager.retrieve_voter_from_voter_device_id(voter_device_id, read_only=False)
     voter_id = voter_results['voter_id']
     if not positive_value_exists(voter_id):
         status += "VOTER_NOT_FOUND_FROM_DEVICE_ID-VOTER_UPDATE "
@@ -2260,6 +2391,27 @@ def voter_update_view(request):  # voterUpdate
     # At this point, we have a valid voter
     voter = voter_results['voter']
     voter_we_vote_id = voter.we_vote_id
+
+    if delete_voter_account:
+        # We want to fully delete this record
+        results = delete_all_voter_information_permanently(voter_to_delete=voter)
+        if results['success']:
+            status += "VOTER_DELETED_COMPLETELY "
+            json_data = {
+                'status':           status,
+                'success':          True,
+                'voter_deleted':    True,
+            }
+        else:
+            status += "VOTER_NOT_DELETED: " + results['status'] + " "
+            json_data = {
+                'status':               status,
+                'success':              True,
+                'voter_not_deleted':    True,
+            }
+        response = HttpResponse(json.dumps(json_data), content_type='application/json')
+        return response
+
     voter_full_name_at_start = voter.get_full_name(real_name_only=True)
 
     if at_least_one_variable_has_changed or external_voter_id_to_be_saved:
@@ -2639,16 +2791,24 @@ def voter_notification_settings_update_view(request):  # voterNotificationSettin
         interface_status_flags = False
 
     try:
-        flag_integer_to_set = request.GET['flag_integer_to_set']
-        flag_integer_to_set = flag_integer_to_set.strip()
-        flag_integer_to_set = convert_to_int(flag_integer_to_set)
+        flag_integer_to_set_changed = positive_value_exists(request.GET['flag_integer_to_set_changed'])
+        if flag_integer_to_set_changed:
+            flag_integer_to_set = request.GET['flag_integer_to_set']
+            flag_integer_to_set = flag_integer_to_set.strip()
+            flag_integer_to_set = convert_to_int(flag_integer_to_set)
+        else:
+            flag_integer_to_set = False
     except KeyError:
         flag_integer_to_set = False
 
     try:
-        flag_integer_to_unset = request.GET['flag_integer_to_unset']
-        flag_integer_to_unset = flag_integer_to_unset.strip()
-        flag_integer_to_unset = convert_to_int(flag_integer_to_unset)
+        flag_integer_to_unset_changed = positive_value_exists(request.GET['flag_integer_to_unset_changed'])
+        if flag_integer_to_unset_changed:
+            flag_integer_to_unset = request.GET['flag_integer_to_unset']
+            flag_integer_to_unset = flag_integer_to_unset.strip()
+            flag_integer_to_unset = convert_to_int(flag_integer_to_unset)
+        else:
+            flag_integer_to_unset = False
     except KeyError:
         flag_integer_to_unset = False
 
@@ -2761,7 +2921,7 @@ def voter_notification_settings_update_view(request):  # voterNotificationSettin
     if at_least_one_variable_has_changed:
         pass
     else:
-        # If here, there is nothing to change and we just want to return the latest data from the voter object
+        # If here, there is nothing to change. We just want to return the latest data from the voter object
         status += "MISSING_NOTIFICATION_VARIABLE_NO_VARIABLES_PASSED_IN_TO_CHANGE "
         json_data = {
                 'status':                           status,
@@ -2824,6 +2984,7 @@ def voter_verify_secret_code_view(request):  # voterVerifySecretCode
     """
     Compare a time-limited 6 digit secret code against this specific voter_device_id. If correct, sign in the
     voter_device_id.
+    See also voter_email_address_verify_for_api  # voterEmailAddressVerify
     :param request:
     :return:
     """
@@ -2938,18 +3099,18 @@ def voter_verify_secret_code_view(request):  # voterVerifySecretCode
                 # We get the new email being verified, so we can find the normalized_email_address and check to see
                 # if that is in use by someone else.
                 secret_key_results = email_manager.retrieve_email_address_object_from_secret_key(
-                    voter_device_link.email_secret_key)
+                    email_secret_key=voter_device_link.email_secret_key)
                 if secret_key_results['email_address_object_found']:
                     email_object_from_secret_key = secret_key_results['email_address_object']
 
                     matching_results = email_manager.retrieve_email_address_object(
-                        email_object_from_secret_key.normalized_email_address)
+                        normalized_email_address=email_object_from_secret_key.normalized_email_address)
                     if matching_results['email_address_object_found']:
-                        email_address_from_normalized = matching_results['email_address_object']
-                        if positive_value_exists(email_address_from_normalized.email_ownership_is_verified):
-                            if positive_value_exists(email_address_from_normalized.voter_we_vote_id):
+                        email_object_from_normalized = matching_results['email_address_object']
+                        if positive_value_exists(email_object_from_normalized.email_ownership_is_verified):
+                            if positive_value_exists(email_object_from_normalized.voter_we_vote_id):
                                 voter_results = voter_manager.retrieve_voter_by_we_vote_id(
-                                    email_address_from_normalized.voter_we_vote_id)
+                                    email_object_from_normalized.voter_we_vote_id)
                                 if voter_results['voter_found']:
                                     voter_from_normalized = voter_results['voter']
                                     # If here we know the voter account still exists
@@ -2958,11 +3119,11 @@ def voter_verify_secret_code_view(request):  # voterVerifySecretCode
                                         new_owner_voter = voter_from_normalized
                     elif matching_results['email_address_list_found']:
                         email_address_list = matching_results['email_address_list']
-                        for email_address_from_normalized in email_address_list:
-                            if positive_value_exists(email_address_from_normalized.email_ownership_is_verified):
-                                if positive_value_exists(email_address_from_normalized.voter_we_vote_id):
+                        for email_object_from_normalized in email_address_list:
+                            if positive_value_exists(email_object_from_normalized.email_ownership_is_verified):
+                                if positive_value_exists(email_object_from_normalized.voter_we_vote_id):
                                     voter_results = voter_manager.retrieve_voter_by_we_vote_id(
-                                        email_address_from_normalized.voter_we_vote_id)
+                                        email_object_from_normalized.voter_we_vote_id)
                                     if voter_results['voter_found']:
                                         voter_from_normalized = voter_results['voter']
                                         # If here we know the voter account still exists
@@ -2982,7 +3143,7 @@ def voter_verify_secret_code_view(request):  # voterVerifySecretCode
                 else:
                     # Find and verify the unverified email we are verifying
                     email_results = email_manager.verify_email_address_object_from_secret_key(
-                        voter_device_link.email_secret_key)
+                        email_secret_key=voter_device_link.email_secret_key)
                     if email_results['email_address_object_found']:
                         email_address_object = email_results['email_address_object']
                         status += "EMAIL_ADDRESS_FOUND_FROM_VERIFY "
@@ -3015,6 +3176,7 @@ def voter_verify_secret_code_view(request):  # voterVerifySecretCode
     }
     return HttpResponse(json.dumps(json_data), content_type='application/json')
 
+
 @csrf_exempt
 def voter_contact_list_retrieve_view(request):  # voterContactListRetrieve
     """
@@ -3025,20 +3187,26 @@ def voter_contact_list_retrieve_view(request):  # voterContactListRetrieve
     success = True
     status = ''
     status, voter, voter_found, voter_device_link = views_voter_utils.get_voter_from_request(request, status)
-    voter_contact_email_google_count = 0
+    voter_contact_from_apple_api_count = 0
+    voter_contact_from_google_api_count = 0
+    voter_contact_email_google_count = 0      # Old variable, on way to deprecation
+
     voter_contact_email_list = []
 
     if hasattr(voter, 'we_vote_id'):
         retrieve_results = voter_contact_list_retrieve_for_api(voter_we_vote_id=voter.we_vote_id)
         voter_contact_email_list = retrieve_results['voter_contact_email_list']
-        voter_contact_email_google_count = retrieve_results['voter_contact_email_google_count']
-
+        voter_contact_email_google_count = retrieve_results['voter_contact_email_google_count']   # Old variable
+        voter_contact_from_apple_api_count = retrieve_results['voter_contact_from_apple_api']
+        voter_contact_from_google_api_count = retrieve_results['voter_contact_from_google_api']
     json_data = {
-        'status':                           status,
-        'success':                          success,
-        'voter_contact_email_google_count': voter_contact_email_google_count,
-        'voter_contact_email_list':         voter_contact_email_list,
-        'voter_contact_email_list_count':   len(voter_contact_email_list),
+        'status':                               status,
+        'success':                              success,
+        'voter_contact_from_apple_api_count':   voter_contact_from_apple_api_count,
+        'voter_contact_from_google_api_count':  voter_contact_from_google_api_count,
+        'voter_contact_email_google_count':     voter_contact_email_google_count,      # Old variable
+        'voter_contact_email_list':             voter_contact_email_list,
+        'voter_contact_email_list_count':       len(voter_contact_email_list),
     }
     return HttpResponse(json.dumps(json_data), content_type='application/json')
 
@@ -3055,6 +3223,7 @@ def voter_contact_list_save_view(request):  # voterContactListSave
     contacts_stored = 0
 
     status, voter, voter_found, voter_device_link = views_voter_utils.get_voter_from_request(request, status)
+    voter_we_vote_id = voter.we_vote_id if hasattr(voter, 'we_vote_id') else ''
     contacts_string = request.POST.get('contacts', None)
 
     augment_with_location = request.POST.get('augment_voter_contact_emails_with_location', False)
@@ -3067,36 +3236,36 @@ def voter_contact_list_save_view(request):  # voterContactListSave
     delete_all_voter_contact_emails = positive_value_exists(delete_all_voter_contact_emails)
     google_api_key_type = request.POST.get('google_api_key_type', 'ballot')
 
-    if delete_all_voter_contact_emails:
-        results = delete_all_voter_contact_emails_for_voter(voter_we_vote_id=voter.we_vote_id)
-    elif hasattr(voter, 'we_vote_id') and contacts_string:
+    if delete_all_voter_contact_emails and voter_we_vote_id:
+        results = delete_all_voter_contact_emails_for_voter(voter_we_vote_id=voter_we_vote_id)
+    elif positive_value_exists(voter_we_vote_id) and contacts_string:
         contacts = json.loads(contacts_string)
         contacts_stored = len(contacts)
-        results = save_google_contacts(voter_we_vote_id=voter.we_vote_id, contacts=contacts)
+        results = save_google_contacts(voter_we_vote_id=voter_we_vote_id, contacts=contacts)
         status += results['status']
 
-    if augment_with_we_vote_data:
+    if augment_with_we_vote_data and positive_value_exists(voter_we_vote_id):
         from email_outbound.controllers import augment_emails_for_voter_with_we_vote_data
-        augment_results = augment_emails_for_voter_with_we_vote_data(voter_we_vote_id=voter.we_vote_id)
+        augment_results = augment_emails_for_voter_with_we_vote_data(voter_we_vote_id=voter_we_vote_id)
         status += augment_results['status']
 
     # 2021-09-30 Requires Pro account which costs $90/month
     # 2022-06-06 We are currently paying for this SendGrid account, so we can implement this
     # from email_outbound.controllers import augment_emails_for_voter_with_sendgrid
-    # augment_results = augment_emails_for_voter_with_sendgrid(voter_we_vote_id=voter.we_vote_id)
+    # augment_results = augment_emails_for_voter_with_sendgrid(voter_we_vote_id=voter_we_vote_id)
     # status += augment_results['status']
 
     # Did not find any matches out of 750 sent and costs $39/month
     # from import_export_snovio.controllers import augment_emails_for_voter_with_snovio
-    # augment_results = augment_emails_for_voter_with_snovio(voter_we_vote_id=voter.we_vote_id)
+    # augment_results = augment_emails_for_voter_with_snovio(voter_we_vote_id=voter_we_vote_id)
     # status += augment_results['status']
 
-    if augment_with_location:
+    if augment_with_location and voter_we_vote_id:
         from import_export_open_people.controllers import augment_emails_for_voter_with_open_people
-        augment_results = augment_emails_for_voter_with_open_people(voter_we_vote_id=voter.we_vote_id)
+        augment_results = augment_emails_for_voter_with_open_people(voter_we_vote_id=voter_we_vote_id)
         status += augment_results['status']
 
-    retrieve_results = voter_contact_list_retrieve_for_api(voter_we_vote_id=voter.we_vote_id)
+    retrieve_results = voter_contact_list_retrieve_for_api(voter_we_vote_id=voter_we_vote_id)
     voter_contact_email_list = retrieve_results['voter_contact_email_list']
     voter_contact_email_google_count = retrieve_results['voter_contact_email_google_count']
 
@@ -3114,7 +3283,7 @@ def voter_contact_list_save_view(request):  # voterContactListSave
         'voter_contact_email_google_count': voter_contact_email_google_count,
         'voter_contact_email_list':         voter_contact_email_list,
         'voter_contact_email_list_count':   len(voter_contact_email_list),
-        'we_vote_id_for_google_contacts':   voter.we_vote_id,
+        'we_vote_id_for_google_contacts':   voter_we_vote_id,
     }
     return HttpResponse(json.dumps(json_data), content_type='application/json')
 
@@ -3128,6 +3297,7 @@ def voter_contact_save_view(request):  # voterContactSave
     status, voter, voter_found, voter_device_link = views_voter_utils.get_voter_from_request(request, status)
     email_address_text = request.GET.get('email_address_text', None)
     ignore_voter_contact = positive_value_exists(request.GET.get('ignore_voter_contact', False))
+    stop_ignoring_voter_contact = positive_value_exists(request.GET.get('stop_ignoring_voter_contact', False))
 
     try:
         voter_we_vote_id = voter.we_vote_id
@@ -3135,17 +3305,21 @@ def voter_contact_save_view(request):  # voterContactSave
         status += "VOTER_CONTACT_SAVE_NO_VOTER_WE_VOTE_ID: " + str(e) + " "
         voter_we_vote_id = ''
 
-    action_variable_found = positive_value_exists(ignore_voter_contact)
+    action_variable_found = positive_value_exists(ignore_voter_contact) or \
+        positive_value_exists(stop_ignoring_voter_contact)
     if not positive_value_exists(action_variable_found) or not positive_value_exists(email_address_text) or \
             not positive_value_exists(voter_we_vote_id):
         email_ignored = False
         status += "VOTER_CONTACT_SAVE_MISSING_KEY_VARIABLE "
         success = False
         json_data = {
-            'status':                   status,
-            'success':                  success,
-            'email_address_text':       email_address_text,
-            'email_ignored':            email_ignored,
+            'status': status,
+            'success': success,
+            'action_variable_found': action_variable_found,
+            'email_address_text': email_address_text,
+            'email_ignored': email_ignored,
+            'ignore_voter_contact': ignore_voter_contact,
+            'stop_ignoring_voter_contact': stop_ignoring_voter_contact,
         }
         return HttpResponse(json.dumps(json_data), content_type='application/json')
 
@@ -3165,16 +3339,25 @@ def voter_contact_save_view(request):  # voterContactSave
             except Exception as e:
                 success = False
                 status += "VOTER_CONTACT_EMAIL_FAILED_TO_SAVE_IGNORE: " + str(e) + ' '
+        elif stop_ignoring_voter_contact:
+            try:
+                voter_contact_email.ignore_contact = False
+                voter_contact_email.save()
+                email_ignored = False
+            except Exception as e:
+                success = False
+                status += "VOTER_CONTACT_EMAIL_FAILED_TO_SAVE_STOP_IGNORING: " + str(e) + ' '
         else:
             status += "VOTER_CONTACT_EMAIL_ACTION_MISSING "
     else:
         status += "VOTER_CONTACT_EMAIL_NOT_FOUND "
     json_data = {
-        'status':                   status,
-        'success':                  success,
-        'action_variable_found':    action_variable_found,
-        'email_address_text':       email_address_text,
-        'email_ignored':            email_ignored,
-        'ignore_voter_contact':     ignore_voter_contact,
+        'status':                       status,
+        'success':                      success,
+        'action_variable_found':        action_variable_found,
+        'email_address_text':           email_address_text,
+        'email_ignored':                email_ignored,
+        'ignore_voter_contact':         ignore_voter_contact,
+        'stop_ignoring_voter_contact':  stop_ignoring_voter_contact,
     }
     return HttpResponse(json.dumps(json_data), content_type='application/json')

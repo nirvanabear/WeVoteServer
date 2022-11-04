@@ -1033,7 +1033,7 @@ class BallotItemListManager(models.Manager):
         success = False
         status = ''
         try:
-            ballot_item_queryset = BallotItem.objects.all()
+            ballot_item_queryset = BallotItem.objects.using('readonly').all()
             ballot_item_queryset = ballot_item_queryset.filter(google_civic_election_id=google_civic_election_id)
             if positive_value_exists(state_code):
                 ballot_item_queryset = ballot_item_queryset.filter(state_code__iexact=state_code)
@@ -1063,7 +1063,7 @@ class BallotItemListManager(models.Manager):
         success = False
         status = ''
         try:
-            ballot_item_queryset = BallotItem.objects.all()
+            ballot_item_queryset = BallotItem.objects.using('readonly').all()
             ballot_item_queryset = ballot_item_queryset.filter(google_civic_election_id=google_civic_election_id)
             ballot_item_queryset = ballot_item_queryset.filter(Q(state_code=None) | Q(state_code=""))
             ballot_item_list_count = ballot_item_queryset.count()
@@ -1301,6 +1301,11 @@ class BallotItemListManager(models.Manager):
         ballot_item_list = []
         ballot_item_list_found = False
         status = ''
+        success = True
+        # Since the BallotItem table stores the election_id as a string, convert
+        google_civic_election_id_string_list = []
+        for one_id in google_civic_election_id_list:
+            google_civic_election_id_string_list.append(str(one_id))
         try:
             if positive_value_exists(voter_id):
                 # Intentionally not using 'readonly' here as the default
@@ -1308,12 +1313,12 @@ class BallotItemListManager(models.Manager):
                     ballot_item_queryset = BallotItem.objects.using('readonly').all()
                 else:
                     ballot_item_queryset = BallotItem.objects.all()
+                ballot_item_queryset = ballot_item_queryset.filter(voter_id=voter_id)
+                ballot_item_queryset = ballot_item_queryset.filter(
+                    google_civic_election_id__in=google_civic_election_id_string_list)
                 if not positive_value_exists(ignore_ballot_item_order):
                     ballot_item_queryset = \
                         ballot_item_queryset.order_by('local_ballot_order', 'google_ballot_placement')
-                ballot_item_queryset = ballot_item_queryset.filter(voter_id=voter_id)
-                ballot_item_queryset = ballot_item_queryset.filter(
-                    google_civic_election_id__in=google_civic_election_id_list)
                 ballot_item_list = list(ballot_item_queryset)
 
             if len(ballot_item_list):
@@ -1329,9 +1334,10 @@ class BallotItemListManager(models.Manager):
             handle_exception(e, logger=logger)
             status += 'FAILED retrieve_all_ballot_items_for_voter ' \
                       '{error} [type: {error_type}] '.format(error=e.message, error_type=type(e))
+            success = False
 
         results = {
-            'success':                      True if ballot_item_list_found else False,
+            'success':                      success,
             'status':                       status,
             'google_civic_election_id_list': google_civic_election_id_list,
             'voter_id':                     voter_id,
@@ -1395,7 +1401,7 @@ class BallotItemListManager(models.Manager):
         if results['success']:
             election_list = results['election_list']
             for one_election in election_list:
-                ballot_item_queryset = BallotItem.objects.all()
+                ballot_item_queryset = BallotItem.objects.using('readonly').all()
                 ballot_item_queryset = ballot_item_queryset.filter(
                     google_civic_election_id=one_election.google_civic_election_id)
                 number_found = ballot_item_queryset.count()
@@ -1410,7 +1416,7 @@ class BallotItemListManager(models.Manager):
         voter_id = convert_to_int(voter_id)
         google_civic_election_id = convert_to_int(google_civic_election_id)
         try:
-            ballot_item_queryset = BallotItem.objects.all()
+            ballot_item_queryset = BallotItem.objects.using('readonly').all()
             if positive_value_exists(voter_id):
                 ballot_item_queryset = ballot_item_queryset.filter(
                     voter_id=voter_id)
@@ -1983,6 +1989,7 @@ class BallotReturnedManager(models.Manager):
                 status += "BALLOT_RETURNED_FOUND_FROM_POLLING_LOCATION_WE_VOTE_ID "
             elif positive_value_exists(google_civic_election_id):
                 ballot_returned_query = BallotReturned.objects.filter(google_civic_election_id=google_civic_election_id)
+                ballot_returned_query = ballot_returned_query.filter(Q(voter_id__isnull=True) | Q(voter_id=0))
                 ballot_returned_query = ballot_returned_query.order_by("-ballot_location_shortcut")
                 ballot_returned = ballot_returned_query.first()
                 if ballot_returned and hasattr(ballot_returned, "id"):
@@ -3057,7 +3064,7 @@ class BallotReturnedListManager(models.Manager):
     def fetch_ballot_location_display_option_on_count_for_election(self, google_civic_election_id, state_code=''):
         google_civic_election_id = convert_to_int(google_civic_election_id)
         try:
-            ballot_returned_queryset = BallotReturned.objects.all()
+            ballot_returned_queryset = BallotReturned.objects.using('readonly').all()
             ballot_returned_queryset = ballot_returned_queryset.filter(
                 google_civic_election_id=google_civic_election_id)
             ballot_returned_queryset = ballot_returned_queryset.filter(ballot_location_display_option_on=True)

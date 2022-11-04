@@ -294,5 +294,8 @@ class WeVoteAPIsV1TestsCampaignRetrieve(TransactionTestCase):
 
 
 
+<<<<<<< HEAD
 
 
+=======
+>>>>>>> develop
